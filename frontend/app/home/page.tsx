@@ -164,7 +164,7 @@ export default function HomePage() {
                     <span className="truncate">{grant.path ?? grant.name}</span>
                   ) : (
                     <Link
-                      href={`/resources/view/${grant.node_id}`}
+                      href={`/resources/view?fileId=${grant.node_id}`}
                       className="truncate hover:text-accent hover:underline"
                     >
                       {grant.path ?? grant.name}
@@ -209,7 +209,7 @@ export default function HomePage() {
               {overview.recent_views.map((view) => (
                 <Link
                   key={view.node_id}
-                  href={`/resources/view/${view.node_id}`}
+                  href={`/resources/view?fileId=${view.node_id}`}
                   className="group block px-5 py-3"
                 >
                   <div className="truncate text-sm group-hover:text-accent">

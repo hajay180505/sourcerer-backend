@@ -70,7 +70,7 @@ function shareUrl(node: { id: string; is_folder: boolean }): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return node.is_folder
     ? `${origin}/resources?folder=${node.id}`
-    : `${origin}/resources/view/${node.id}`;
+    : `${origin}/resources/view?fileId=${node.id}`;
 }
 
 export function ViewSwitcher({
@@ -298,7 +298,7 @@ export default function FileBrowser({
 
   const openItem = (node: CatalogNode, unlocked: boolean) => {
     if (node.is_folder) openFolder(node.id, node.name);
-    else if (unlocked) router.push(`/resources/view/${node.id}`);
+    else if (unlocked) router.push(`/resources/view?fileId=${node.id}`);
     else selection?.toggle(node);
   };
 

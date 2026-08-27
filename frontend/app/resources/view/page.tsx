@@ -3,7 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, FileQuestion, Loader2, Lock } from "lucide-react";
 import Link from "next/link";
-import { use } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import ProtectedContent from "@/components/portal/protected-content";
 import ShareMenu from "@/components/portal/share-menu";
 import { formatSize } from "@/lib/format";
@@ -21,27 +22,35 @@ import {
   getContentMeta,
 } from "@/lib/portal-api";
 
-export default function ViewerPage({
-  params,
-}: {
-  params: Promise<{ fileId: string }>;
-}) {
-  const { fileId } = use(params);
+function Spinner() {
+  return (
+    <div className="grid min-h-[70vh] place-items-center text-muted">
+      <Loader2 className="size-6 animate-spin" />
+    </div>
+  );
+}
+
+/** The file id travels as `?fileId=` rather than a path segment: the app is
+ *  statically exported, so a dynamic `[fileId]` route has no id to prerender. */
+export default function ViewerPage() {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <Viewer />
+    </Suspense>
+  );
+}
+
+function Viewer() {
+  const fileId = useSearchParams().get("fileId") ?? "";
   const { data: me, isLoading: meLoading } = useMe();
   const { data: meta, error, isLoading } = useQuery({
     queryKey: ["content-meta", fileId],
     queryFn: () => getContentMeta(fileId),
-    enabled: !!me,
+    enabled: !!me && !!fileId,
     retry: false,
   });
 
-  if (meLoading || (me && isLoading)) {
-    return (
-      <div className="grid min-h-[70vh] place-items-center text-muted">
-        <Loader2 className="size-6 animate-spin" />
-      </div>
-    );
-  }
+  if (meLoading || (me && !!fileId && isLoading)) return <Spinner />;
 
   if (!me) {
     return (
@@ -54,6 +63,26 @@ export default function ViewerPage({
           >
             Sign in to continue
           </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (!fileId) {
+    return (
+      <div className="grid min-h-[70vh] place-items-center">
+        <div className="glass max-w-md p-8 text-center">
+          <FileQuestion className="mx-auto mb-3 size-8 text-muted" />
+          <h1 className="font-semibold">No file selected</h1>
+          <p className="mt-2 text-sm text-muted">
+            This link is missing a file reference.
+          </p>
+          <Link
+            href="/resources"
+            className="btn-primary mt-5 inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white"
+          >
+            <ArrowLeft className="size-4" /> Back to library
+          </Link>
         </div>
       </div>
     );
@@ -133,7 +162,7 @@ export default function ViewerPage({
           </p>
         </div>
         <ShareMenu
-          url={`${typeof window !== "undefined" ? window.location.origin : ""}/resources/view/${fileId}`}
+          url={`${typeof window !== "undefined" ? window.location.origin : ""}/resources/view?fileId=${fileId}`}
           title={meta.name}
           className="ml-auto"
         />

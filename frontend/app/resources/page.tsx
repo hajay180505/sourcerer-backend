@@ -279,7 +279,7 @@ export default function LibraryPage() {
                     )}
                     {!node.is_folder && unlocked ? (
                       <Link
-                        href={`/resources/view/${node.id}`}
+                        href={`/resources/view?fileId=${node.id}`}
                         className="truncate hover:text-accent hover:underline"
                       >
                         {node.path}

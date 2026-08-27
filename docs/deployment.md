@@ -75,3 +75,34 @@ Redis, cache-path, and in-network `DATABASE_URL` variables are injected by compo
     The portal image bundles headless LibreOffice for office→PDF conversion
     (writer/impress/calc, `--no-install-recommends`), adding roughly 700 MB.
     Everything else about its build follows the standard uv two-stage pattern.
+
+## Production topology (portal beta)
+
+The shipped beta runs the portal only, split across two hosts that share the
+`ewhizard.tech` registrable domain (so they are **same-site** and the session
+cookie stays `SameSite=Lax; Secure`):
+
+```
+Browser
+  ├─▶ sourcerer.ewhizard.tech       Cloudflare Pages  (static Next.js export)
+  └─▶ api.sourcerer.ewhizard.tech   Azure VM: Caddy ─▶ gateway ─▶ portal ─▶ Neon
+```
+
+| Piece | Where | Config |
+|---|---|---|
+| Frontend | Cloudflare Pages, `frontend/` → `out/` | `NEXT_PUBLIC_API_URL` build var |
+| API | Azure B1s VM | `deploy/docker-compose.prod.yml` + `deploy/Caddyfile.api` |
+| Postgres | Neon (managed) | `DATABASE_URL` in `deploy/.env` |
+
+`next.config.ts` defaults to `output: "export"` — the app is a pure client SPA,
+so every route prerenders to static HTML and the viewer takes its file id from
+`?fileId=` rather than a dynamic path segment. The Docker image sets
+`NEXT_OUTPUT=standalone` to build the Node-server flavour for the single-origin
+compose stack instead.
+
+Managed-Postgres URLs carry libpq-only params (`sslmode`, `channel_binding`)
+that asyncpg rejects; `app/db/session.py` translates `sslmode` into asyncpg's
+`ssl` connect arg and drops the rest, and Alembic reuses that same
+normalization so startup migrations reach Neon too.
+
+The full bring-up runbook is `deploy/PRODUCTION.md`.

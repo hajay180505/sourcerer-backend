@@ -1,0 +1,91 @@
+# Production (split-origin) deployment: Cloudflare Pages serves the frontend,
+# this VM serves only the API — caddy (auto-HTTPS) -> gateway -> portal, with
+# Postgres hosted off-box (Neon). No RAG services, no frontend container, no
+# database container.
+#
+#   cd deploy
+#   cp .env.prod.example .env   # fill in values
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# The two hosts are same-site subdomains of ewhizard.tech, so the session
+# cookie stays SameSite=Lax; Secure and only a plain CORS allowance is needed.
+# (For the single-origin flavour — app + API behind one hostname on this VM —
+# use docker-compose.beta.yml instead.)
+
+name: sourcerer-prod
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_ADDRESS: ${API_ADDRESS:?set API_ADDRESS in deploy/.env}
+    volumes:
+      - ./Caddyfile.api:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: services/gateway/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Portal-only: empty string disables a route in the gateway.
+      INGESTION_URL: ""
+      RETRIEVAL_URL: ""
+      QUIZ_URL: ""
+      PORTAL_URL: http://portal:8000
+      CORS_ORIGINS: ${APP_ORIGIN:?set APP_ORIGIN in deploy/.env}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    depends_on:
+      portal:
+        condition: service_healthy
+
+  portal:
+    build:
+      context: ..
+      dockerfile: services/portal/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false # interpolation below still enforces the critical vars
+    environment:
+      GDRIVE_SERVICE_ACCOUNT_PATH: /srv/secrets/acc.json
+      PORTAL_CACHE_DIR: /srv/portal-cache
+      PORTAL_FRONTEND_ORIGIN: ${APP_ORIGIN:?set APP_ORIGIN in deploy/.env}
+      PORTAL_ALLOWED_ORIGINS: ${APP_ORIGIN}
+      GOOGLE_CALLBACK_URL: https://${API_ADDRESS}/api/v1/portal/auth/callback
+      # Critical config — fail the whole `up` loudly if unset, rather than
+      # silently booting on the insecure dev session key, the local dev
+      # database, or the wrong Drive folder.
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (managed Postgres) in deploy/.env}
+      PORTAL_SESSION_SECRET: ${PORTAL_SESSION_SECRET:?set a strong PORTAL_SESSION_SECRET in deploy/.env}
+      PORTAL_ROOT_FOLDER_ID: ${PORTAL_ROOT_FOLDER_ID:?set PORTAL_ROOT_FOLDER_ID in deploy/.env}
+      PORTAL_COOKIE_SECURE: "true"
+      PORTAL_COOKIE_SAMESITE: lax # same-site subdomains — no "none" needed
+    volumes:
+      - ../secrets:/srv/secrets:ro
+      - portal-cache:/srv/portal-cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+volumes:
+  portal-cache:
+  caddy-data:
+  caddy-config:

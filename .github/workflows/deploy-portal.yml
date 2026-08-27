@@ -1,0 +1,58 @@
+name: Deploy portal (prod)
+
+# Push-to-deploy for the backend VM. Fires only after CI has gone green on
+# `main`, so a red commit never reaches production. The frontend deploys
+# separately via Cloudflare Pages' own Git integration.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: # manual redeploy (e.g. after changing deploy/.env)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-portal
+  cancel-in-progress: false # never interrupt a half-finished deploy
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    # workflow_run fires on failure too; only deploy green runs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ~/sourcerer
+            git fetch --prune origin main
+            git checkout main
+            git pull --ff-only origin main
+            docker compose -f deploy/docker-compose.prod.yml up -d --build
+            docker image prune -f
+
+            # Wait for the API to answer through Caddy before calling it done.
+            API_ADDRESS="$(grep -E '^API_ADDRESS=' deploy/.env | cut -d= -f2-)"
+            for i in $(seq 1 30); do
+              if curl -fsS "https://${API_ADDRESS}/health" >/dev/null; then
+                echo "healthy: https://${API_ADDRESS}/health"
+                exit 0
+              fi
+              sleep 5
+            done
+            echo "API did not become healthy in 150s" >&2
+            docker compose -f deploy/docker-compose.prod.yml ps
+            docker compose -f deploy/docker-compose.prod.yml logs --tail 80 portal gateway caddy
+            exit 1

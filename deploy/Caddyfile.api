@@ -1,0 +1,36 @@
+# API-only origin for the split deployment: the frontend is served by
+# Cloudflare Pages (sourcerer.ewhizard.tech), this VM serves only the API at
+# API_ADDRESS (api.sourcerer.ewhizard.tech). Caddy provisions Let's Encrypt for
+# API_ADDRESS, so its DNS record must point straight at this VM (DNS-only /
+# grey cloud in Cloudflare — a proxied record breaks the ACME challenge and
+# buffers video).
+
+{$API_ADDRESS} {
+	encode zstd gzip
+
+	# Baseline security headers for every response served from this origin.
+	# (CORS headers come from the gateway, which knows the app origin.)
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	handle /api/* {
+		# flush_interval -1: no response buffering (video streaming, SSE later)
+		reverse_proxy gateway:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle /health {
+		reverse_proxy gateway:8000
+	}
+
+	# Nothing else lives here — the app is on Cloudflare Pages.
+	handle {
+		respond "Not found" 404
+	}
+}

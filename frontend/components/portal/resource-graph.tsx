@@ -79,7 +79,7 @@ export default function ResourceGraph({
         if (node.id !== rootId) onOpenFolder?.(node.id, node.name);
       } else {
         // The viewer route handles missing access with a request prompt.
-        router.push(`/resources/view/${node.id}`);
+        router.push(`/resources/view?fileId=${node.id}`);
       }
     },
     [rootId, router, onOpenFolder]

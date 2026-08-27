@@ -12,6 +12,9 @@ COPY . .
 # Baked into the client bundle at build time.
 ARG NEXT_PUBLIC_API_URL=http://localhost:8001
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# This image serves the app from a Node server (single-origin compose); the
+# default `next build` target is the static export used by Cloudflare Pages.
+ENV NEXT_OUTPUT=standalone
 RUN npm run build
 
 FROM node:22-alpine AS runner

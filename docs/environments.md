@@ -26,10 +26,21 @@ repo root.
 |---|---|---|---|---|---|
 | **dev** | `dev` | `docker-compose.yml` (root) | `.env` from `.env.schema` | insecure, `Lax` | `localhost:3000/3001` |
 | **staging** | `staging` | `deploy/docker-compose.beta.yml` | `deploy/.env` from `.env.staging.example` | `Secure`, `Lax` | `https://<staging host>` |
-| **prod** | `main` | `deploy/docker-compose.beta.yml` | `deploy/.env` from `.env.beta.example` | `Secure`, `Lax` | `https://<prod host>` |
+| **prod** | `main` | `deploy/docker-compose.prod.yml` + Cloudflare Pages | `deploy/.env` from `.env.prod.example` | `Secure`, `Lax` | `https://sourcerer.ewhizard.tech` + `https://api.sourcerer.ewhizard.tech` |
 
-Staging and prod run the **same** single-origin stack (Caddy auto-HTTPS →
-frontend + gateway → portal → postgres); they differ only by their
-`deploy/.env`. Keep their secrets, DB passwords, `SITE_ADDRESS`, and ideally
-their OAuth clients **distinct**. See `deploy/ENVIRONMENTS.md` and
-[Deployment](deployment.md) for the runbook, backups, and TLS.
+Dev and staging run the **single-origin** stack (Caddy auto-HTTPS → frontend +
+gateway → portal → postgres in a container). Prod is **split-origin**: a static
+Next.js export on Cloudflare Pages, an API-only VM, and managed Postgres (Neon)
+— the two hosts are same-site subdomains, so cookies stay `SameSite=Lax`. Keep
+each tier's secrets, database, and ideally its OAuth client **distinct**. See
+`deploy/PRODUCTION.md`, `deploy/ENVIRONMENTS.md`, and
+[Deployment](deployment.md) for runbooks, backups, and TLS.
+
+## Continuous deployment
+
+- **Frontend** — Cloudflare Pages' Git integration builds `frontend/` (output
+  `out/`): Production on `main`, Preview for every other branch and PR.
+- **Backend** — `.github/workflows/deploy-portal.yml` waits for a **green CI run
+  on `main`**, then SSHes to the VM, pulls, rebuilds the prod compose stack, and
+  polls `/health`. Manual `workflow_dispatch` redeploys are allowed. It needs
+  the `SSH_HOST`, `SSH_USER`, `SSH_KEY` (optional `SSH_PORT`) Actions secrets.

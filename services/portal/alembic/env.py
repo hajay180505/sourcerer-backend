@@ -10,13 +10,17 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.db import models  # noqa: F401 — populate Base.metadata
 from app.db.base import Base
+from app.db.session import build_engine_args
 from sourcerer_core.config import settings
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Same URL/SSL normalization the app engine uses, so `alembic upgrade head`
+# reaches a managed Postgres (Neon/Supabase) exactly as the portal does.
+db_url, connect_args = build_engine_args(settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", db_url)
 target_metadata = Base.metadata
 
 
@@ -42,6 +46,7 @@ async def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

@@ -1,7 +1,12 @@
 # Beta deployment — Azure for Students (₹0 / $0)
 
-Portal-only beta: `caddy → frontend + gateway → portal → postgres` on one
-Ubuntu VM. No credit card anywhere in this flow.
+Portal-only, **single origin**: `caddy → frontend + gateway → portal →
+postgres` on one Ubuntu VM. No credit card anywhere in this flow. Used for
+staging (and as the simple all-in-one option).
+
+> **Production** runs split-origin instead — Cloudflare Pages for the frontend,
+> this VM for the API only, Neon for Postgres. See **[PRODUCTION.md](PRODUCTION.md)**.
+> Steps 1–3 below (Azure account, VM, swap/Docker) apply to both.
 
 ## 1. Azure for Students account (no card)
 
