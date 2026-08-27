@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import DriveNode, MdLink
+from app.services import visibility
 from app.services.gdrive import NodeRecord, download_file_bytes, walk_folder_metadata
 from sourcerer_core.config import settings
 
@@ -90,6 +91,8 @@ async def upsert_records(
     # enough (the self-FK CASCADE is just a safety net).
     await db.execute(delete(DriveNode).where(DriveNode.synced_at < run_started_at))
     await db.commit()
+    # New/moved/swept nodes change effective visibility; rebuild on next read.
+    visibility.invalidate_cache()
     return changed_md
 
 

@@ -18,6 +18,9 @@ export interface Me {
   is_admin: boolean;
 }
 
+/** Explicit per-node setting; null inherits from the nearest-set ancestor. */
+export type NodeVisibility = "public" | "private" | null;
+
 export interface CatalogNode {
   id: string;
   parent_id: string | null;
@@ -29,6 +32,13 @@ export interface CatalogNode {
   path: string;
   path_ids: string;
   child_count?: number;
+  /** Effective (resolved) visibility. false on a listed folder means it is a
+   * bare structural container — reachable but not requestable. */
+  effective_public?: boolean;
+  /** Admin payloads only. */
+  visibility?: NodeVisibility;
+  public_count?: number;
+  desc_count?: number;
 }
 
 export interface GraphData {
@@ -254,6 +264,13 @@ export const adminPatchGrant = (id: string, expiresAt: string) =>
 
 export const adminRevokeGrant = (id: string) =>
   send<{ ok: boolean }>("POST", `/admin/grants/${id}/revoke`);
+
+export const adminSetVisibility = (nodeId: string, visibility: NodeVisibility) =>
+  send<{ ok: boolean; visibility: NodeVisibility }>(
+    "PATCH",
+    `/admin/nodes/${encodeURIComponent(nodeId)}/visibility`,
+    { visibility }
+  );
 
 export const adminTriggerSync = () => send<{ started: boolean }>("POST", "/admin/sync");
 

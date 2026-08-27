@@ -6,12 +6,19 @@
  * (granted content only) pages. The current folder is mirrored into
  * ?folder=<id> so folder links are shareable. */
 
-import { useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   ChevronRight,
+  CircleDashed,
   FileText,
   Film,
   Folder,
+  Globe,
   Image as ImageIcon,
   LayoutGrid,
   List,
@@ -28,7 +35,13 @@ import { useEffect, useState } from "react";
 import ResourceGraph from "@/components/portal/resource-graph";
 import ShareMenu from "@/components/portal/share-menu";
 import { formatSize, isUnlocked } from "@/lib/format";
-import { CatalogNode, MyGrant, getChildren, getMyGrants } from "@/lib/portal-api";
+import {
+  CatalogNode,
+  MyGrant,
+  adminSetVisibility,
+  getChildren,
+  getMyGrants,
+} from "@/lib/portal-api";
 
 export type ViewMode = "grid" | "list" | "graph";
 
@@ -112,6 +125,54 @@ function LockBadge({ unlocked }: { unlocked: boolean }) {
   );
 }
 
+/** Admin tri-state visibility control: inherit → public → private → inherit.
+ * Shows the explicit setting (solid) or the inherited effective state
+ * (dashed), and public/total descendant counts for folders. */
+function VisibilityToggle({ node }: { node: CatalogNode }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (visibility: "public" | "private" | null) =>
+      adminSetVisibility(node.id, visibility),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["catalog-children"] }),
+  });
+  const explicit = node.visibility ?? null;
+  const next =
+    explicit === null ? "public" : explicit === "public" ? "private" : null;
+  const effectivePublic = node.effective_public === true;
+  const Icon =
+    explicit === "public" ? Globe : explicit === "private" ? Lock : CircleDashed;
+  const label =
+    explicit ??
+    (effectivePublic ? "inherits · public" : "inherits · private");
+  return (
+    <button
+      onClick={(event) => {
+        event.stopPropagation();
+        mutation.mutate(next);
+      }}
+      disabled={mutation.isPending}
+      title={`Visibility: ${label} — click to make ${next ?? "inherited"}`}
+      className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors duration-100 ${
+        explicit === "public"
+          ? "bg-success/15 text-success"
+          : explicit === "private"
+            ? "bg-danger/15 text-danger"
+            : effectivePublic
+              ? "text-success/70 hover:bg-white/[0.06]"
+              : "text-faint hover:bg-white/[0.06]"
+      }`}
+    >
+      {mutation.isPending ? (
+        <Loader2 className="size-3 animate-spin" />
+      ) : (
+        <Icon className="size-3" />
+      )}
+      {explicit ? explicit : effectivePublic ? "public" : "private"}
+    </button>
+  );
+}
+
 function SelectBox({
   node,
   selection,
@@ -121,7 +182,9 @@ function SelectBox({
   selection?: Selection;
   unlocked: boolean;
 }) {
-  if (!selection || unlocked) return null;
+  // Structural containers (visible only so their public contents stay
+  // reachable) are not requestable.
+  if (!selection || unlocked || node.effective_public === false) return null;
   return (
     <input
       type="checkbox"
@@ -175,20 +238,36 @@ export default function FileBrowser({
     data: childrenData,
     isLoading: childrenLoading,
     isError: childrenError,
+    isPlaceholderData,
   } = useQuery({
     queryKey: ["catalog-children", folderId],
     queryFn: () => getChildren(folderId),
     staleTime: 5 * 60_000,
+    // Entering a new folder keeps the previous listing on screen (dimmed)
+    // instead of collapsing to a spinner; visited folders render instantly.
+    placeholderData: keepPreviousData,
     enabled: !virtualRoot,
     retry: 1,
   });
+
+  // Warm the cache for a subfolder the moment the cursor reaches its card, so
+  // the click usually lands on already-loaded data.
+  const queryClient = useQueryClient();
+  const prefetchFolder = (id: string) =>
+    queryClient.prefetchQuery({
+      queryKey: ["catalog-children", id],
+      queryFn: () => getChildren(id),
+      staleTime: 5 * 60_000,
+    });
 
   // Resolve a deep link into breadcrumbs (parent carries the full path). If the
   // linked folder can't be loaded (swept from the catalog, network error), fall
   // back to the root rather than leaving pendingLink stuck true forever.
   useEffect(() => {
     if (!pendingLink) return;
-    if (childrenData) {
+    // Placeholder data belongs to the previously viewed folder — deciding on
+    // it would clear the deep link before its own listing ever arrives.
+    if (childrenData && !isPlaceholderData) {
       const parent = childrenData.parent;
       if (parent.id === pendingLink) {
         const ids = parent.path_ids.split("/").filter(Boolean);
@@ -202,7 +281,7 @@ export default function FileBrowser({
       setPendingLink(null);
       setCrumbs([]);
     }
-  }, [pendingLink, childrenData, childrenError]);
+  }, [pendingLink, childrenData, childrenError, isPlaceholderData]);
 
   // Keep the URL shareable: mirror the current folder into ?folder=.
   useEffect(() => {
@@ -307,13 +386,21 @@ export default function FileBrowser({
             : "This folder is empty."}
         </div>
       ) : view === "grid" ? (
-        <div className="space-y-7">
+        <div
+          className={`space-y-7 transition-opacity duration-150 ${
+            isPlaceholderData ? "opacity-50" : ""
+          }`}
+        >
           {folders.length > 0 && (
             <section>
               <SectionLabel label="Folders" count={folders.length} />
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 {folders.map((node) => {
                   const unlocked = unlockedFor(node.path_ids);
+                  // Private container shown only so its public contents stay
+                  // reachable — render it bare (dimmed, no request checkbox).
+                  const structural =
+                    !isAdmin && !unlocked && node.effective_public === false;
                   return (
                     <div
                       key={node.id}
@@ -321,18 +408,30 @@ export default function FileBrowser({
                       tabIndex={0}
                       onClick={() => openItem(node, unlocked)}
                       onKeyDown={(e) => e.key === "Enter" && openItem(node, unlocked)}
+                      onMouseEnter={() => prefetchFolder(node.id)}
                       className="glass glass-hover group flex cursor-pointer items-center gap-3 px-4 py-3 text-left"
                     >
-                      <Folder className="size-5 shrink-0 text-accent" />
+                      <Folder
+                        className={`size-5 shrink-0 ${structural ? "text-faint" : "text-accent"}`}
+                      />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm">
+                        <span
+                          className={`block truncate text-sm ${structural ? "text-muted" : ""}`}
+                        >
                           {node.name}
                         </span>
                         <span className="block text-[11px] text-faint">
                           {node.child_count ?? 0} items
+                          {isAdmin && node.desc_count != null
+                            ? ` · ${node.public_count ?? 0}/${node.desc_count} public`
+                            : ""}
                         </span>
                       </span>
-                      <LockBadge unlocked={unlocked} />
+                      {isAdmin ? (
+                        <VisibilityToggle node={node} />
+                      ) : (
+                        <LockBadge unlocked={unlocked} />
+                      )}
                       <SelectBox
                         node={node}
                         selection={selection}
@@ -366,7 +465,11 @@ export default function FileBrowser({
                           className={`size-5 ${unlocked ? "text-accent" : "text-faint"}`}
                         />
                         <span className="flex items-center gap-2">
-                          <LockBadge unlocked={unlocked} />
+                          {isAdmin ? (
+                            <VisibilityToggle node={node} />
+                          ) : (
+                            <LockBadge unlocked={unlocked} />
+                          )}
                           <SelectBox
                             node={node}
                             selection={selection}
@@ -393,7 +496,11 @@ export default function FileBrowser({
           )}
         </div>
       ) : (
-        <div className="space-y-7">
+        <div
+          className={`space-y-7 transition-opacity duration-150 ${
+            isPlaceholderData ? "opacity-50" : ""
+          }`}
+        >
           {(
             [
               ["Folders", folders],
@@ -407,6 +514,8 @@ export default function FileBrowser({
                   <div className="glass divide-y divide-border/60">
                     {group.map((node) => {
                       const unlocked = unlockedFor(node.path_ids);
+                      const structural =
+                        !isAdmin && !unlocked && node.effective_public === false;
                       const Icon = node.is_folder
                         ? Folder
                         : fileIcon(node.name, node.mime_type);
@@ -419,18 +528,23 @@ export default function FileBrowser({
                           onKeyDown={(e) =>
                             e.key === "Enter" && openItem(node, unlocked)
                           }
+                          onMouseEnter={() =>
+                            node.is_folder && prefetchFolder(node.id)
+                          }
                           className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors duration-100 hover:bg-white/[0.04]"
                         >
                           <Icon
                             className={`size-4.5 shrink-0 ${
-                              node.is_folder || unlocked
+                              (node.is_folder && !structural) || unlocked
                                 ? "text-accent"
                                 : "text-faint"
                             }`}
                           />
                           <span
                             className={`min-w-0 flex-1 truncate ${
-                              unlocked || node.is_folder ? "" : "text-muted"
+                              (unlocked || node.is_folder) && !structural
+                                ? ""
+                                : "text-muted"
                             }`}
                           >
                             {node.name}
@@ -440,8 +554,21 @@ export default function FileBrowser({
                               ? `${node.child_count ?? 0} items`
                               : formatSize(node.size) || "—"}
                           </span>
-                          <span className="flex w-24 shrink-0 items-center justify-end gap-2.5">
-                            <LockBadge unlocked={unlocked} />
+                          {isAdmin && node.is_folder && node.desc_count != null && (
+                            <span className="shrink-0 text-[11px] text-faint">
+                              {node.public_count ?? 0}/{node.desc_count} public
+                            </span>
+                          )}
+                          <span
+                            className={`flex shrink-0 items-center justify-end gap-2.5 ${
+                              isAdmin ? "w-32" : "w-24"
+                            }`}
+                          >
+                            {isAdmin ? (
+                              <VisibilityToggle node={node} />
+                            ) : (
+                              <LockBadge unlocked={unlocked} />
+                            )}
                             <SelectBox
                               node={node}
                               selection={selection}

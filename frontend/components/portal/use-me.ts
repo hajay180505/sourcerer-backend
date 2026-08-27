@@ -8,7 +8,9 @@ export function useMe() {
   return useQuery({
     queryKey: ["me"],
     queryFn: getMe,
-    staleTime: 60_000,
+    // Session state only changes through login/logout (both reset the cache);
+    // keep it fresh long enough that page switches never wait on /auth/me.
+    staleTime: 15 * 60_000,
     retry: false,
   });
 }

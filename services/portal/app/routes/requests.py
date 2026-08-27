@@ -10,6 +10,7 @@ from app.db.models import AccessRequest, AccessRequestItem, AuditEvent, DriveNod
 from app.deps import CurrentUser, DbSession
 from app.services import audit
 from app.services.access import active_grants
+from app.services.visibility import load_map
 
 router = APIRouter(prefix="/portal/requests", tags=["requests"])
 
@@ -71,6 +72,17 @@ async def create_request(
     missing = [n for n in node_ids if n not in found]
     if missing:
         raise HTTPException(status_code=400, detail=f"Unknown items: {missing[:5]}")
+
+    # Only effectively-public material is requestable; private nodes are
+    # invisible to users, so a request naming one is either stale UI state or
+    # someone probing ids. Same 400 either way, no existence leak beyond
+    # what `found` already confirmed.
+    vmap = await load_map(db)
+    not_public = [n for n in node_ids if not vmap.is_public(n)]
+    if not_public:
+        raise HTTPException(
+            status_code=400, detail=f"Not requestable: {not_public[:5]}"
+        )
 
     req = AccessRequest(
         user_id=user.id,

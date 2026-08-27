@@ -229,8 +229,9 @@ export default function LibraryPage() {
         <div>
           <h1 className="text-2xl font-medium tracking-[-0.02em]">Library</h1>
           <p className="mt-1 text-sm text-muted">
-            Everything in the archive. Tick locked items to request timed
-            access — unlocked ones open right here.
+            {me.is_admin
+              ? "Everything in the archive. Use the visibility toggles to control what users can see and request."
+              : "Public materials from the archive. Tick locked items to request timed access — unlocked ones open right here."}
           </p>
         </div>
         <div className="flex items-center gap-2">

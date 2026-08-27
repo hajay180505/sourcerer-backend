@@ -26,12 +26,24 @@ the portal's read-only service account.
   `PORTAL_SYNC_EXCLUDE` globs are pruned. Obsidian `[[wikilinks]]` are
   extracted incrementally (only new/changed `.md` files) into `md_links`
   for the graph view.
-- **Access control** — users request access to folders/files
-  (`access_requests` + items); the admin approves with an adjustable period,
-  producing one `grants` row per item. A folder grant covers its whole
-  subtree via a single indexed `path_ids LIKE prefix` check. Grants can be
-  extended, shortened, or revoked at any time; every decision and every
-  content view is written to `audit_events`.
+- **Visibility** — every node carries a tri-state `visibility`
+  (`public` / `private` / NULL = inherit); the effective value is the nearest
+  explicitly-set self-or-ancestor, defaulting to **private**. Inheritance is
+  live: marking a folder public exposes its whole subtree (including files
+  that sync in later) except explicitly-private descendants. Non-admin users
+  only see effectively-public nodes, nodes their active grants cover (a
+  grant overrides visibility), and the bare "structural" parent folders
+  needed to reach them; only public nodes are requestable. Flipping a node
+  private never touches existing grants or pending requests. Toggles live in
+  the admin's Library view (`PATCH /admin/nodes/{id}/visibility`, audited as
+  `visibility_changed`); the setting survives catalog syncs because the sync
+  upsert never writes that column.
+- **Access control** — users request access to (effectively-public)
+  folders/files (`access_requests` + items); the admin approves with an
+  adjustable period, producing one `grants` row per item. A folder grant
+  covers its whole subtree via a single indexed `path_ids LIKE prefix`
+  check. Grants can be extended, shortened, or revoked at any time; every
+  decision and every content view is written to `audit_events`.
 - **Content** — `/content/{id}/raw` streams bytes straight from the Drive
   API with `Range` passthrough (video seeking works through the gateway);
   `/content/{id}/pdf` serves office files (LibreOffice headless) and
@@ -49,7 +61,7 @@ the portal's read-only service account.
 | catalog | `GET /catalog/children`, `GET /catalog/search`, `GET /catalog/graph` |
 | requests | `POST /requests`, `GET /requests/mine`, `POST /requests/{id}/cancel`, `GET /grants/mine` |
 | content | `GET /content/{id}/meta` (mints a ticket), `GET /content/{id}/raw`, `GET /content/{id}/pdf` |
-| admin | `GET/POST /admin/requests*`, `GET/PATCH/POST /admin/grants*`, `POST /admin/users/{id}/revoke-sessions`, `POST /admin/sync`, `GET /admin/sync/status`, `GET /admin/users`, `GET /admin/audit` |
+| admin | `GET/POST /admin/requests*`, `GET/PATCH/POST /admin/grants*`, `PATCH /admin/nodes/{id}/visibility`, `POST /admin/users/{id}/revoke-sessions`, `POST /admin/sync`, `GET /admin/sync/status`, `GET /admin/users`, `GET /admin/audit` |
 
 ## Storage
 

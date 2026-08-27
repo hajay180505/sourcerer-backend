@@ -37,6 +37,7 @@ def utcnow() -> datetime:
 
 REQUEST_STATUSES = ("pending", "approved", "denied", "cancelled")
 GRANT_STATUSES = ("active", "revoked")
+VISIBILITIES = ("public", "private")
 
 
 class User(Base):
@@ -78,6 +79,13 @@ class DriveNode(Base):
     path_names: Mapped[str] = mapped_column(Text, nullable=False)
     depth: Mapped[int] = mapped_column(Integer, nullable=False)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Admin-set tri-state; NULL inherits from the nearest explicitly-set
+    # ancestor (default: private). Deliberately not written by catalog sync so
+    # settings survive re-syncs; a swept node loses its setting, which fails
+    # safe (back to private).
+    visibility: Mapped[str | None] = mapped_column(
+        Enum(*VISIBILITIES, name="node_visibility", native_enum=False, length=8)
+    )
 
     __table_args__ = (
         # text_pattern_ops so `path_ids LIKE 'prefix%'` uses the index on Postgres.

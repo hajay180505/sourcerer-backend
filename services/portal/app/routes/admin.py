@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -19,7 +20,7 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal
 from app.deps import CurrentAdmin, DbSession
-from app.services import audit, catalog_sync
+from app.services import audit, catalog_sync, visibility
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,11 @@ class DenyBody(BaseModel):
 
 class PatchGrantBody(BaseModel):
     expires_at: datetime
+
+
+class VisibilityBody(BaseModel):
+    # None = clear the override and inherit from the nearest-set ancestor.
+    visibility: Literal["public", "private"] | None
 
 
 @router.get("/requests")
@@ -297,6 +303,37 @@ async def revoke_grant(grant_id: uuid.UUID, admin: CurrentAdmin, db: DbSession) 
     )
     await db.commit()
     return {"ok": True}
+
+
+@router.patch("/nodes/{node_id}/visibility")
+async def set_visibility(
+    node_id: str, body: VisibilityBody, admin: CurrentAdmin, db: DbSession
+) -> dict:
+    """Set or clear a node's explicit visibility. Inheritance is live: a folder
+    set public exposes its whole subtree except explicitly-private descendants,
+    including files that sync in later. Existing grants are never touched —
+    flipping to private only stops new discovery/requests."""
+    node = (
+        await db.execute(select(DriveNode).where(DriveNode.id == node_id))
+    ).scalar_one_or_none()
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    previous = node.visibility
+    node.visibility = body.visibility
+    await audit.record(
+        db,
+        "visibility_changed",
+        user_id=admin.id,
+        node_id=node.id,
+        meta={
+            "visibility": body.visibility,
+            "previous": previous,
+            "path": node.path_names,
+        },
+    )
+    await db.commit()
+    visibility.invalidate_cache()
+    return {"ok": True, "visibility": node.visibility}
 
 
 @router.get("/users")
