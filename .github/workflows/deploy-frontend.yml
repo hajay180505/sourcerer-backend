@@ -1,0 +1,69 @@
+name: Deploy frontend (Pages)
+
+# Direct-upload CD for the Cloudflare Pages project. Like the backend deploy,
+# it fires only after CI has gone green on `main`, so a red commit never ships.
+#
+# Preview deployments for `dev`/`staging` are deliberately NOT wired up: a
+# preview build would have to point at some API, and the prod API only
+# allow-lists the production app origin (PORTAL_ALLOWED_ORIGINS), so such a
+# preview would fail CORS. Add them alongside a staging API.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: # manual redeploy (e.g. after changing the API hostname)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    # workflow_run fires on failure too; only deploy green runs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run checks out the default branch by default — pin to the
+          # exact commit CI validated.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (pinned lockfile)
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build static export
+        working-directory: frontend
+        env:
+          # Baked into the client bundle at build time. Override by setting a
+          # NEXT_PUBLIC_API_URL repository variable.
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://api.sourcerer.ewhizard.tech' }}
+        run: npm run build
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: frontend
+          # --branch=main marks this the production deployment (it matches the
+          # project's production branch).
+          command: >-
+            pages deploy out
+            --project-name=sourcerer
+            --branch=main
+            --commit-hash=${{ github.event.workflow_run.head_sha || github.sha }}

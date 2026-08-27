@@ -80,31 +80,41 @@ In Google Cloud Console → your OAuth client, **add** (keeping the dev entries)
 - Authorized redirect URI:
   `https://api.sourcerer.ewhizard.tech/api/v1/portal/auth/callback`
 
-## 6. Cloudflare Pages — frontend
+## 6. Cloudflare Pages — frontend (direct upload)
 
-Pages → *Create a project* → *Connect to Git* → this repo:
+The project already exists — created with the CLI, so it is a **direct-upload**
+project (not Git-connected; Cloudflare cannot convert between the two):
 
-| Setting | Value |
-|---|---|
-| Production branch | `main` |
-| Root directory | `frontend` |
-| Build command | `npm run build` |
-| Output directory | `out` |
-| Build env var | `NEXT_PUBLIC_API_URL = https://api.sourcerer.ewhizard.tech` (Production **and** Preview) |
+```bash
+npx wrangler login
+npx wrangler pages project create sourcerer --production-branch=main
+```
 
-Then *Custom domains* → add `sourcerer.ewhizard.tech`. Pages builds Production
-on `main` and Preview deployments for every other branch/PR — that is the whole
-frontend CD, no workflow file.
+Live at <https://sourcerer-4gj.pages.dev>. To publish by hand:
 
-`next.config.ts` emits a static export (`out/`) by default; the Docker image
+```bash
+cd frontend
+NEXT_PUBLIC_API_URL=https://api.sourcerer.ewhizard.tech npm run build
+npx wrangler pages deploy out --project-name=sourcerer --branch=main
+```
+
+`--branch=main` matches the project's production branch, so that upload becomes
+the production deployment; any other `--branch` value creates a preview.
+`NEXT_PUBLIC_API_URL` is baked into the bundle at build time — change the API
+hostname and you must rebuild, not just redeploy.
+
+Custom domain: dashboard → Workers & Pages → `sourcerer` → *Custom domains* →
+add `sourcerer.ewhizard.tech`. Wrangler has no `pages domain` command.
+
+`next.config.ts` emits the static export (`out/`) by default; the Docker image
 sets `NEXT_OUTPUT=standalone` for the single-origin compose flavour.
 
-## 7. Backend CD
+## 7. CD — both halves
 
-`.github/workflows/deploy-portal.yml` deploys on every **green CI run on
-`main`** (and on manual dispatch): SSH to the VM → `git pull --ff-only` →
-`docker compose -f deploy/docker-compose.prod.yml up -d --build` → wait for
-`/health`.
+| Workflow | Trigger | Does |
+|---|---|---|
+| `.github/workflows/deploy-portal.yml` | green CI on `main`, or manual | SSH to the VM → `git pull --ff-only` → `docker compose -f deploy/docker-compose.prod.yml up -d --build` → poll `/health` |
+| `.github/workflows/deploy-frontend.yml` | green CI on `main`, or manual | `npm ci && npm run build` (static export) → `wrangler pages deploy out` |
 
 Repo → *Settings* → *Secrets and variables* → *Actions*:
 
@@ -114,9 +124,18 @@ Repo → *Settings* → *Secrets and variables* → *Actions*:
 | `SSH_USER` | `azureuser` |
 | `SSH_KEY` | private key (PEM) of a key authorized on the VM |
 | `SSH_PORT` | optional, defaults to 22 |
+| `CLOUDFLARE_API_TOKEN` | API token with *Account → Cloudflare Pages → Edit* |
+| `CLOUDFLARE_ACCOUNT_ID` | shown by `npx wrangler whoami` |
 
-Until those exist the workflow fails at the SSH step; deploy by hand with the
-step-4 commands in the meantime.
+Optional repository **variable** `NEXT_PUBLIC_API_URL` overrides the API
+hostname baked into the frontend build (default:
+`https://api.sourcerer.ewhizard.tech`).
+
+Until those secrets exist the workflows fail at their deploy step; publish by
+hand with the step-4 and step-6 commands in the meantime.
+
+Both workflows live on `dev` right now — they only start firing once `main`
+carries them and CI passes there.
 
 ## 8. Verify
 

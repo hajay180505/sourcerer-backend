@@ -38,8 +38,11 @@ each tier's secrets, database, and ideally its OAuth client **distinct**. See
 
 ## Continuous deployment
 
-- **Frontend** — Cloudflare Pages' Git integration builds `frontend/` (output
-  `out/`): Production on `main`, Preview for every other branch and PR.
+- **Frontend** — `.github/workflows/deploy-frontend.yml` builds the static
+  export after a green CI run on `main` and uploads it to the Cloudflare Pages
+  project `sourcerer` with `wrangler pages deploy` (direct upload, not a
+  Git-connected project). Needs the `CLOUDFLARE_API_TOKEN` and
+  `CLOUDFLARE_ACCOUNT_ID` Actions secrets.
 - **Backend** — `.github/workflows/deploy-portal.yml` waits for a **green CI run
   on `main`**, then SSHes to the VM, pulls, rebuilds the prod compose stack, and
   polls `/health`. Manual `workflow_dispatch` redeploys are allowed. It needs

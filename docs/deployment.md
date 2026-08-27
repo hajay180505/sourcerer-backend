@@ -90,7 +90,7 @@ Browser
 
 | Piece | Where | Config |
 |---|---|---|
-| Frontend | Cloudflare Pages, `frontend/` → `out/` | `NEXT_PUBLIC_API_URL` build var |
+| Frontend | Cloudflare Pages project `sourcerer` (direct upload of `frontend/out/`) | `NEXT_PUBLIC_API_URL` baked at build time |
 | API | Azure B1s VM | `deploy/docker-compose.prod.yml` + `deploy/Caddyfile.api` |
 | Postgres | Neon (managed) | `DATABASE_URL` in `deploy/.env` |
 
